@@ -1,0 +1,11 @@
+node_modules/
+database/sentinel.db
+services/logs/
+.chaos-backups/
+.chaos-event.json
+.DS_Store
+dist/
+build/
+.next/
+.env
+.env.local

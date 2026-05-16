@@ -1,0 +1,33 @@
+{
+  "name": "project-sentinel",
+  "version": "1.0.0",
+  "description": "Autonomous Incident Resolution Engine — Project Sentinel",
+  "private": true,
+  "workspaces": [
+    "app",
+    "services/auth-service",
+    "services/payment-service",
+    "services/inventory-service",
+    "services/notification-service"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "services": "concurrently \"npm run start --workspace=services/auth-service\" \"npm run start --workspace=services/payment-service\" \"npm run start --workspace=services/inventory-service\" \"npm run start --workspace=services/notification-service\"",
+    "dashboard": "npm run dev --workspace=app",
+    "health-check": "node scripts/healthCheck.js",
+    "chaos": "node scripts/chaosMonkey.js",
+    "sentinel": "node scripts/sentinel-agent.js",
+    "db:init": "node database/db.js",
+    "api": "node scripts/apiServer.js",
+    "dev": "concurrently --names \"SERVICES,HEALTH,API,DASHBOARD\" --prefix-colors \"cyan,yellow,blue,magenta\" \"npm run services\" \"npm run health-check\" \"npm run api\" \"npm run dashboard\"",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "sql.js": "^1.12.0"
+  }
+}

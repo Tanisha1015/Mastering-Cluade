@@ -1,0 +1,14 @@
+{
+  "name": "payment-service",
+  "version": "1.0.0",
+  "description": "Payment processing microservice for Project Sentinel",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node tests/regression.test.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}
