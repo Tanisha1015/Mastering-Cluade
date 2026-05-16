@@ -18,7 +18,11 @@ const PORT = 3099;
 
 const db = require(path.join(__dirname, '..', 'database', 'db.js'));
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+}));
 app.use(express.json());
 
 // ── Initialize DB on startup ─────────────────────────────────────────────────

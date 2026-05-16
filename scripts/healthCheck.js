@@ -143,11 +143,11 @@ async function pollService(service) {
     const { statusCode, body } = await httpGet('localhost', port, '/health');
 
     if (statusCode === 200 && body.status === 'HEALTHY') {
-      // Service is healthy
+      // Service is healthy — mark it and resolve any open incidents
       db.updateServiceStatus(name, 'HEALTHY', null, body.uptime || 0);
       console.log(`[POLLER] ✅ ${name} — HEALTHY (uptime: ${body.uptime}s)`);
 
-      // Resolve any open incidents for this service
+      // Resolve any open/investigating incidents for this service
       const openIncidents = db.getIncidents('OPEN').filter(i => i.service_name === name);
       const investigatingIncidents = db.getIncidents('INVESTIGATING').filter(i => i.service_name === name);
       const allActiveIncidents = [...openIncidents, ...investigatingIncidents];
@@ -172,21 +172,39 @@ async function pollService(service) {
         db.logAgentAction('Health Poller', `Auto-resolved incident #${incident.id} for ${name}`, 'Service returned HEALTHY');
         console.log(`[POLLER] 🔧 Auto-resolved incident #${incident.id} for ${name}`);
       }
+
+    } else if (statusCode === 200 && body.status === 'CRITICAL') {
+      // CM-003: Logic Error — service is running but reporting CRITICAL status
+      // This MUST create a real CRITICAL incident, not just WARNING.
+      const errorMsg = `Service self-reported CRITICAL status (CM-003: Logic Error)`;
+      db.updateServiceStatus(name, 'CRITICAL', errorMsg);
+      logError(name, errorMsg);
+
+      const incidentId = db.createIncident(name, 'CM-003', errorMsg, 'CRITICAL');
+      // createIncident returns existing id if one is open — only log on new creation
+      const existing = db.getIncidents('OPEN').find(i => i.service_name === name && Number(i.id) === Number(incidentId));
+      if (existing && existing.description === errorMsg) {
+        logIncidentHistory(name, 'CM-003', errorMsg, 'OPEN');
+        db.logAgentAction('Health Poller', `Created incident #${incidentId} for ${name} (CM-003)`, errorMsg);
+      }
+      console.error(`[POLLER] 🚨 ${name} — CRITICAL (CM-003)! Incident #${incidentId}`);
+
     } else {
-      // Service returned non-HEALTHY status
+      // Non-200 or unknown status — mark as WARNING
       const errorMsg = body.error || `Service returned status ${body.status || statusCode}`;
       db.updateServiceStatus(name, 'WARNING', errorMsg);
       console.warn(`[POLLER] ⚠️  ${name} — WARNING: ${errorMsg}`);
     }
+
   } catch (error) {
-    // Service is unreachable or crashed
+    // Service is unreachable or crashed — CRITICAL
     const errorMessage = error.message;
     const errorType = classifyError(errorMessage);
 
     db.updateServiceStatus(name, 'CRITICAL', errorMessage);
     logError(name, `CRITICAL — ${errorMessage} (Type: ${errorType})`);
 
-    // Create incident if one doesn't already exist
+    // createIncident deduplicates — only creates if no OPEN/INVESTIGATING incident exists
     const incidentId = db.createIncident(
       name,
       errorType,
@@ -194,10 +212,15 @@ async function pollService(service) {
       'CRITICAL'
     );
 
-    logIncidentHistory(name, errorType, `Service unreachable: ${errorMessage}`, 'OPEN');
-    db.logAgentAction('Health Poller', `Created incident #${incidentId} for ${name}`, errorMessage);
+    // Check if this is a genuinely new incident (id matches a freshly inserted row)
+    const openForService = db.getIncidents('OPEN').filter(i => i.service_name === name);
+    const isNew = openForService.length === 1 && Number(openForService[0].id) === Number(incidentId);
+    if (isNew) {
+      logIncidentHistory(name, errorType, `Service unreachable: ${errorMessage}`, 'OPEN');
+      db.logAgentAction('Health Poller', `Created incident #${incidentId} for ${name}`, errorMessage);
+    }
 
-    console.error(`[POLLER] 🚨 ${name} — CRITICAL! Incident #${incidentId} created. Error: ${errorMessage}`);
+    console.error(`[POLLER] 🚨 ${name} — CRITICAL! Incident #${incidentId}. Error: ${errorMessage}`);
   }
 }
 

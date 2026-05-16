@@ -7,7 +7,6 @@
  *   CM-002: Missing Dependency — removes a require() call
  *   CM-003: Logic Error       — changes a variable name or return value
  *   CM-004: JSON Corruption   — corrupts a package.json file
- *   CM-005: Port Conflict     — changes the PORT constant to conflict with another service
  *
  * Usage: node scripts/chaosMonkey.js [--service <name>] [--bug <CM-001|CM-002|..>]
  * If no args given, picks a random service and random bug type.
@@ -48,7 +47,7 @@ const SERVICE_PORTS = {
 };
 
 // All bug types
-const BUG_TYPES = ['CM-001', 'CM-002', 'CM-003', 'CM-004', 'CM-005'];
+const BUG_TYPES = ['CM-001', 'CM-002', 'CM-003', 'CM-004'];
 
 /**
  * Write a chaos event to the chaos log.
@@ -201,35 +200,7 @@ function injectJsonCorruption(serviceName) {
   return { bugType: 'CM-004', service: serviceName, file: targetFile, description: 'package.json corrupted with invalid JSON' };
 }
 
-/**
- * CM-005: Port Conflict
- * Changes the service's PORT to conflict with another running service.
- */
-function injectPortConflict(serviceName) {
-  const targetFile = path.join(SERVICES_DIR, serviceName, 'index.js');
 
-  if (!fs.existsSync(targetFile)) {
-    throw new Error(`Target file not found: ${targetFile}`);
-  }
-
-  backupFile(targetFile);
-  let content = fs.readFileSync(targetFile, 'utf8');
-
-  const originalPort = SERVICE_PORTS[serviceName];
-  // Pick a conflicting port (another service's port)
-  const conflictPort = Object.values(SERVICE_PORTS).find(p => p !== originalPort) || 3001;
-
-  const portRegex = new RegExp(`const PORT = ${originalPort};`);
-  if (!portRegex.test(content)) {
-    throw new Error(`Could not find PORT = ${originalPort} in ${serviceName}`);
-  }
-
-  content = content.replace(portRegex, `const PORT = ${conflictPort}; // CM-005: PORT CONFLICT — was ${originalPort}`);
-  fs.writeFileSync(targetFile, content, 'utf8');
-
-  logChaos(`💥 CM-005 PORT CONFLICT injected into ${serviceName}/index.js — PORT changed from ${originalPort} to ${conflictPort}`);
-  return { bugType: 'CM-005', service: serviceName, file: targetFile, description: `Port changed from ${originalPort} to ${conflictPort}` };
-}
 
 // =============================================================================
 // Main Orchestration
@@ -240,7 +211,6 @@ const BUG_INJECTORS = {
   'CM-002': injectMissingDependency,
   'CM-003': injectLogicError,
   'CM-004': injectJsonCorruption,
-  'CM-005': injectPortConflict,
 };
 
 /**
@@ -301,9 +271,8 @@ function restoreAll() {
 }
 
 /**
- * Inject exactly 5 random chaos bugs across services.
- * Picks 5 unique (service, bugType) pairs from the full combination grid,
- * skipping any combo that would fail (e.g. CM-005 already offset port).
+ * Inject exactly 4 random chaos bugs across services.
+ * Picks 4 unique (service, bugType) pairs from the full combination grid,
  */
 function injectMultiChaos() {
   // Build all possible (service, bug) combos and shuffle them
