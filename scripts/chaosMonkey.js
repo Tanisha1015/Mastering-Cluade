@@ -222,23 +222,73 @@ function randomChoice(arr) {
 
 /**
  * Parse command-line arguments.
- * Supports: --service <name> --bug <CM-xxx> --restore
+ * Supports: --service <name> --bug <CM-xxx> --restore --help
  */
 function parseArgs() {
   const args = process.argv.slice(2);
-  const result = { service: null, bug: null, restore: false };
+  const result = { service: null, bug: null, restore: false, help: false };
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--service' && args[i + 1]) result.service = args[++i];
     if (args[i] === '--bug'     && args[i + 1]) result.bug     = args[++i];
     if (args[i] === '--restore')                result.restore  = true;
+    if (args[i] === '--help' || args[i] === '-h') result.help = true;
   }
 
   return result;
 }
 
 /**
+ * Print usage information.
+ */
+function printHelp() {
+  console.log(`
+📖 CHAOS MONKEY — Usage Guide
+${'━'.repeat(55)}
+
+  Default (no args):
+    node scripts/chaosMonkey.js
+    → Injects 1 unique bug into each of the 4 services
+
+  Manual single injection:
+    node scripts/chaosMonkey.js --service <name> --bug <type>
+
+  Restore all files:
+    node scripts/chaosMonkey.js --restore
+
+${'━'.repeat(55)}
+
+  Services:
+    auth-service          (port 3101)
+    payment-service       (port 3102)
+    inventory-service     (port 3103)
+    notification-service  (port 3104)
+
+  Bug Types:
+    CM-001  Syntax Error       — Prepends invalid JS to index.js,
+                                 crashes the process on next start
+    CM-002  Missing Dependency — Comments out 'express' require(),
+                                 crashes the process on next start
+    CM-003  Logic Error        — Changes /health response from
+                                 'HEALTHY' to 'CRITICAL' (stays up)
+    CM-004  JSON Corruption    — Inserts invalid JSON into
+                                 package.json (corrupts npm metadata)
+
+${'━'.repeat(55)}
+
+  Examples:
+    node scripts/chaosMonkey.js --service payment-service --bug CM-001
+    node scripts/chaosMonkey.js --service auth-service --bug CM-003
+    node scripts/chaosMonkey.js --service inventory-service --bug CM-002
+    node scripts/chaosMonkey.js --restore
+`);
+}
+
+/**
  * Restore all backed-up service files.
+ * Reconstructs paths from the flat backup filename format:
+ *   services_auth-service_index.js.bak  → services/auth-service/index.js
+ *   services_payment-service_package.json.bak → services/payment-service/package.json
  */
 function restoreAll() {
   logChaos('🔄 RESTORE MODE — restoring all backed-up files...');
@@ -251,12 +301,26 @@ function restoreAll() {
 
   for (const backup of backups) {
     const backupPath = path.join(BACKUP_DIR, backup);
-    // Reconstruct original path: services_auth-service_index.js.bak → services/auth-service/index.js
-    const originalRelative = backup
-      .replace(/\.bak$/, '')
-      .replace(/^services_/, 'services/')
-      .replace(/_index\.js$/, '/index.js')
-      .replace(/_package\.json$/, '/package.json');
+
+    // Reconstruct path: services_auth-service_index.js.bak → services/auth-service/index.js
+    // The flat name uses underscores as path separators, but service names contain hyphens.
+    // Strategy: strip .bak, split on first underscore to get "services",
+    // then match known file endings to extract filename.
+    const name = backup.replace(/\.bak$/, ''); // e.g. services_auth-service_index.js
+
+    let originalRelative = null;
+    // Match services/<service-name>/index.js
+    const indexMatch = name.match(/^services_(.+)_index\.js$/);
+    const pkgMatch   = name.match(/^services_(.+)_package\.json$/);
+
+    if (indexMatch) {
+      originalRelative = `services/${indexMatch[1]}/index.js`;
+    } else if (pkgMatch) {
+      originalRelative = `services/${pkgMatch[1]}/package.json`;
+    } else {
+      // Fallback: replace underscores with path separators naively
+      originalRelative = name.replace(/_/g, '/');
+    }
 
     const originalPath = path.join(ROOT_DIR, originalRelative);
 
@@ -271,79 +335,101 @@ function restoreAll() {
 }
 
 /**
- * Inject exactly 4 random chaos bugs across services.
- * Picks 4 unique (service, bugType) pairs from the full combination grid,
+ * Kill the process running on a given port (Windows-safe).
+ */
+function killPort(port, killedPorts) {
+  const { execSync } = require('child_process');
+  if (killedPorts.has(port)) return;
+  try {
+    const stdout = execSync(`netstat -ano | findstr :${port}`).toString();
+    const lines = stdout.split('\n').filter(l => l.includes('LISTENING'));
+    if (lines.length > 0) {
+      const pid = lines[0].trim().split(/\s+/).pop();
+      if (pid && pid !== '0') {
+        execSync(`taskkill /F /PID ${pid}`);
+        console.log(`     🔪 Killed process ${pid} on port ${port}`);
+        killedPorts.add(port);
+      }
+    }
+  } catch (err) {
+    console.log(`     ⚠️  Could not kill port ${port}: ${err.message}`);
+  }
+}
+
+/**
+ * Inject exactly 1 random chaos bug per service (4 total — one per service).
+ *
+ * Rules to ensure correct multi-injection behaviour:
+ *  - Each service gets exactly one bug.
+ *  - CM-001/CM-002 crash the process → CM-003 (logic error in health response) is
+ *    pointless on the same service if it's also getting CM-001/CM-002. So we only
+ *    assign CM-003 to a service if no other file-crash bug is assigned to it.
+ *  - CM-004 targets package.json (a different file from index.js), so it can
+ *    coexist in theory — but since we do 1 bug per service, this is moot.
+ *  - Backups are taken BEFORE any injection. The "backup if not exists" guard in
+ *    backupFile() ensures that even if the same file is touched twice (not expected
+ *    here), the original clean copy is always preserved.
  */
 function injectMultiChaos() {
-  // Build all possible (service, bug) combos and shuffle them
-  const allCombos = [];
-  for (const svc of SERVICE_NAMES) {
-    for (const bug of BUG_TYPES) {
-      allCombos.push({ service: svc, bug });
-    }
-  }
-  // Fisher-Yates shuffle
-  for (let i = allCombos.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [allCombos[i], allCombos[j]] = [allCombos[j], allCombos[i]];
-  }
-
   const results = [];
   const killedPorts = new Set();
-  const { execSync } = require('child_process');
 
-  console.log('💥 INJECTING 5 RANDOM CHAOS BUGS...\n');
+  // Shuffle BUG_TYPES so each service gets a UNIQUE bug type (1:1 mapping).
+  // We have exactly 4 services and 4 bug types (CM-001..CM-004), so this gives
+  // a perfect bijection with no repeats.
+  const shuffledBugs = [...BUG_TYPES];
+  for (let i = shuffledBugs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledBugs[i], shuffledBugs[j]] = [shuffledBugs[j], shuffledBugs[i]];
+  }
+
+  console.log('💥 INJECTING 1 UNIQUE CHAOS BUG PER SERVICE (4 TOTAL)...\n');
   console.log('━'.repeat(55));
 
-  for (const pick of allCombos) {
-    if (results.length >= 5) break;
+  SERVICE_NAMES.forEach((serviceName, idx) => {
+    const bugType = shuffledBugs[idx];
+    const injector = BUG_INJECTORS[bugType];
+
+    logChaos(`\n🎯 [${idx + 1}/4] Target: ${serviceName} | Bug: ${bugType}`);
+
     try {
-      logChaos(`\n🎯 [${results.length + 1}/5] Target: ${pick.service} | Bug: ${pick.bug}`);
-      const injector = BUG_INJECTORS[pick.bug];
-      const result = injector(pick.service);
+      const result = injector(serviceName);
       results.push({
         ...result,
         injectedAt: new Date().toISOString(),
         restored: false,
       });
-      console.log(`  💥 [${results.length}/5] ${pick.bug} → ${pick.service}: ${result.description}`);
+      console.log(`  💥 [${idx + 1}/4] ${bugType} → ${serviceName}: ${result.description}`);
 
-      // Kill the service process once per service
-      const port = SERVICE_PORTS[pick.service];
-      if (port && !killedPorts.has(port)) {
-        try {
-          const stdout = execSync(`netstat -ano | findstr :${port}`).toString();
-          const lines = stdout.split('\n').filter(l => l.includes('LISTENING'));
-          if (lines.length > 0) {
-            const pid = lines[0].trim().split(/\s+/).pop();
-            if (pid && pid !== '0') {
-              execSync(`taskkill /F /PID ${pid}`);
-              console.log(`     🔪 Killed process ${pid} on port ${port}`);
-              killedPorts.add(port);
-            }
-          }
-        } catch (err) {
-          console.log(`     ⚠️  Could not kill port ${port}: ${err.message}`);
-        }
+      // Kill the service process for bugs that crash the server.
+      // CM-003: service stays running (just returns wrong /health status) — no kill.
+      // CM-004: corrupts package.json but running process is unaffected — no kill.
+      // CM-001, CM-002: crash the process — kill it.
+      const crashesBug = bugType === 'CM-001' || bugType === 'CM-002';
+      if (crashesBug) {
+        const port = SERVICE_PORTS[serviceName];
+        if (port) killPort(port, killedPorts);
+      } else {
+        console.log(`     ℹ️  ${bugType} doesn't crash the process — no kill needed`);
       }
     } catch (err) {
-      logChaos(`⚠️  Skipped [${pick.bug} → ${pick.service}]: ${err.message}`);
+      logChaos(`⚠️  Skipped [${bugType} → ${serviceName}]: ${err.message}`);
     }
-  }
+  });
 
   console.log('\n' + '━'.repeat(55));
-  console.log(`💥 CHAOS COMPLETE — ${results.length} bugs injected!`);
+  console.log(`💥 CHAOS COMPLETE — ${results.length} bug(s) injected!`);
   console.log('━'.repeat(55));
   results.forEach((r, i) => {
     console.log(`  ${i + 1}. [${r.bugType}] ${r.service} — ${r.description}`);
   });
   console.log('━'.repeat(55));
-  console.log('\n📋 Run the Sentinel Agent to auto-fix all 5:');
-  console.log('   npm run sentinel\n');
+  console.log('\n📋 Run the Sentinel Agent to auto-fix all injected bugs:');
+  console.log('   npm run sentinel -- --once\n');
   console.log('🔄 Or restore manually:');
   console.log('   node scripts/chaosMonkey.js --restore\n');
 
-  // Write all 5 events as an array
+  // Persist all events so the Sentinel Agent can read them
   const chaosEventFile = path.join(ROOT_DIR, '.chaos-event.json');
   fs.writeFileSync(chaosEventFile, JSON.stringify(results, null, 2));
 }
@@ -364,71 +450,83 @@ function main() {
     return;
   }
 
-  // ── DEFAULT (no args): inject exactly 5 random bugs ──────────────────────────
+  // ── HELP ──────────────────────────────────────────────────────────────────────
+  if (args.help) {
+    printHelp();
+    return;
+  }
+
+  // ── DEFAULT (no args): inject 1 unique bug per service ───────────────────────
   if (!args.service && !args.bug) {
     injectMultiChaos();
     return;
   }
 
   // ── EXPLICIT mode: --service <name> --bug <CM-xxx> ────────────────────────────
-  const targetService = args.service || randomChoice(SERVICE_NAMES);
-  const bugType       = args.bug     || randomChoice(BUG_TYPES);
+  if (!args.service || !args.bug) {
+    console.error('❌ Both --service and --bug are required for manual injection.');
+    console.error('   Run with --help to see all options.');
+    process.exit(1);
+  }
+
+  const targetService = args.service;
+  const bugType       = args.bug;
 
   if (!SERVICE_NAMES.includes(targetService)) {
-    console.error(`❌ Unknown service: ${targetService}`);
+    console.error(`❌ Unknown service: "${targetService}"`);
     console.error(`   Valid services: ${SERVICE_NAMES.join(', ')}`);
     process.exit(1);
   }
   if (!BUG_TYPES.includes(bugType)) {
-    console.error(`❌ Unknown bug type: ${bugType}`);
+    console.error(`❌ Unknown bug type: "${bugType}"`);
     console.error(`   Valid types: ${BUG_TYPES.join(', ')}`);
     process.exit(1);
   }
 
-  logChaos(`\n🎯 Target: ${targetService} | Bug: ${bugType}`);
+  logChaos(`\n🎯 Manual Injection: ${targetService} | Bug: ${bugType}`);
 
   try {
     const injector = BUG_INJECTORS[bugType];
     const result = injector(targetService);
+    const event = { ...result, injectedAt: new Date().toISOString(), restored: false };
 
     console.log('\n💥 CHAOS INJECTED SUCCESSFULLY!');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('━'.repeat(40));
     console.log(`   Service:     ${result.service}`);
     console.log(`   Bug Type:    ${result.bugType}`);
     console.log(`   File:        ${result.file}`);
     console.log(`   Description: ${result.description}`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('━'.repeat(40));
 
-    console.log(`\n[CHAOS-MONKEY] 🔪 Killing process on port ${SERVICE_PORTS[result.service]}...`);
-    try {
-      const { execSync } = require('child_process');
-      const stdout = execSync(`netstat -ano | findstr :${SERVICE_PORTS[result.service]}`).toString();
-      const lines = stdout.split('\n').filter(l => l.includes('LISTENING'));
-      if (lines.length > 0) {
-        const pid = lines[0].trim().split(/\s+/).pop();
-        if (pid && pid !== '0') {
-          execSync(`taskkill /F /PID ${pid}`);
-          console.log(`[CHAOS-MONKEY] ✅ Process ${pid} killed.`);
-        }
-      } else {
-        console.log(`[CHAOS-MONKEY] ⚠️  No process found on port ${SERVICE_PORTS[result.service]}.`);
-      }
-    } catch (err) {
-      console.log(`[CHAOS-MONKEY] ⚠️  Could not kill: ${err.message}`);
+    // Only kill the process for bugs that actually crash the server
+    const crashesBug = bugType === 'CM-001' || bugType === 'CM-002';
+    if (crashesBug) {
+      const port = SERVICE_PORTS[targetService];
+      console.log(`\n🔪 Killing ${targetService} process on port ${port}...`);
+      killPort(port, new Set());
+    } else if (bugType === 'CM-003') {
+      console.log(`\nℹ️  CM-003: Service stays running — /health now returns CRITICAL status.`);
+      console.log(`   The health poller will detect this on its next poll.`);
+    } else if (bugType === 'CM-004') {
+      console.log(`\nℹ️  CM-004: package.json corrupted — running process unaffected.`);
+      console.log(`   npm install/start will fail until the Sentinel Agent restores the file.`);
     }
 
-    console.log('\n📋 Run the Sentinel Agent to auto-fix:');
-    console.log('   npm run sentinel\n');
+    // APPEND to existing .chaos-event.json so multiple manual injections stack
+    const chaosEventFile = path.join(ROOT_DIR, '.chaos-event.json');
+    let existingEvents = [];
+    if (fs.existsSync(chaosEventFile)) {
+      try { existingEvents = JSON.parse(fs.readFileSync(chaosEventFile, 'utf8')); }
+      catch { existingEvents = []; }
+      if (!Array.isArray(existingEvents)) existingEvents = [existingEvents];
+      // Remove any previous event for the same service+file so no stale duplicates
+      existingEvents = existingEvents.filter(e => e.file !== result.file);
+    }
+    existingEvents.push(event);
+    fs.writeFileSync(chaosEventFile, JSON.stringify(existingEvents, null, 2));
+
     console.log('🔄 To restore manually:');
     console.log('   node scripts/chaosMonkey.js --restore\n');
-
-    // Write as single-element array — consistent with multi-bug format
-    const chaosEventFile = path.join(ROOT_DIR, '.chaos-event.json');
-    fs.writeFileSync(chaosEventFile, JSON.stringify([{
-      ...result,
-      injectedAt: new Date().toISOString(),
-      restored: false,
-    }], null, 2));
 
   } catch (error) {
     logChaos(`❌ INJECTION FAILED: ${error.message}`);
