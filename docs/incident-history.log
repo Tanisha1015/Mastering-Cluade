@@ -10,3 +10,27 @@
 
 [2026-05-17T03:00:25Z] Service: notification-service | Error: CM-004 | Description: JSON corruption fixed — restored valid package.json from backup | Agent: Sentinel | Status: RESOLVED
 
+[2026-05-16T22:29:06.748Z] Service: auth-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-16T22:29:06.776Z] Service: notification-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-16T22:29:06.911Z] Service: payment-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-16T22:29:06.988Z] Service: inventory-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-16T22:29:09.058Z] Service: auth-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-16T22:29:09.077Z] Service: payment-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-16T22:29:09.103Z] Service: notification-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-16T22:29:09.160Z] Service: inventory-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-17T02:13:56.193Z] Service: payment-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-17T02:13:56.213Z] Service: inventory-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-17T02:13:56.224Z] Service: notification-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-17T02:13:57.177Z] Service: auth-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-17T02:13:59.336Z] Service: auth-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-17T02:13:59.375Z] Service: notification-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-17T02:13:59.443Z] Service: payment-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-17T02:13:59.655Z] Service: inventory-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-17T14:36:09.179Z] Service: inventory-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-17T14:36:09.446Z] Service: auth-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-17T14:36:09.619Z] Service: notification-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-17T14:36:09.657Z] Service: payment-service | Error: UNKNOWN | Description: Service unreachable: read ECONNRESET | Status: OPEN
+[2026-05-17T14:36:11.602Z] Service: payment-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-17T14:36:11.735Z] Service: notification-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-17T14:36:11.818Z] Service: auth-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
+[2026-05-17T14:36:12.013Z] Service: inventory-service | Error: UNKNOWN | Description: Service recovered | Status: RESOLVED
