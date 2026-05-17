@@ -73,9 +73,7 @@ node scripts/chaosMonkey.js
 ```
 
 ### 4. Watch the Sentinel Agent autonomously fix everything
-```bash
-npm run sentinel -- --once
-```
+
 
 ### 5. View the dashboard
 ```
@@ -122,11 +120,6 @@ The agent autonomously:
 5. **Verifies** — restarts the service, checks `/health`, confirms HEALTHY
 6. **Documents** — appends to `docs/incident-history.log`
 
-```bash
-npm run sentinel -- --once
-```
-
----
 
 ## Project Structure
 
@@ -140,7 +133,6 @@ project-sentinel/
 │   └── notification-service/ # Alert service (port 3104)
 ├── scripts/
 │   ├── chaosMonkey.js      # Bug injector
-│   ├── sentinel-agent.js   # Autonomous resolution engine
 │   ├── healthCheck.js      # Service health poller
 │   └── apiServer.js        # Dashboard REST API
 ├── database/
